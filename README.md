@@ -2,7 +2,7 @@
 
 Attempt at an image to ascii converter.
 
-THis program seems to work best with high contrast images.
+This program works best with high contrast images.
 
 ## Run
 
