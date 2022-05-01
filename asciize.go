@@ -25,6 +25,7 @@ SOFTWARE.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -45,7 +46,7 @@ import (
 )
 
 // Detect the line that best suits the region src.
-func detLine(usedFont *truetype.Font, src *image.Gray) string {
+func detLine(usedFont *truetype.Font, src *image.Gray, progress chan fixed.Int26_6) string {
 	result := make([]byte, 0)
 	myFace := truetype.NewFace(usedFont, &truetype.Options{})
 	img := image.NewGray(src.Bounds())
@@ -59,7 +60,7 @@ func detLine(usedFont *truetype.Font, src *image.Gray) string {
 	var x fixed.Int26_6 = 0
 	maxX := fixed.Int26_6(src.Bounds().Max.X) << 6
 	var i byte
-	for x < maxX {
+	for {
 		var bestScore = 2 << 30
 		var best byte
 		newX := x
@@ -94,6 +95,15 @@ func detLine(usedFont *truetype.Font, src *image.Gray) string {
 			draw.Draw(img, image.Rect(x.Floor(), src.Bounds().Min.Y, drawer.Dot.X.Ceil(), src.Bounds().Max.Y), &image.Uniform{color.White}, image.Point{}, draw.Src)
 		}
 		result = append(result, best)
+		if x >= maxX {
+			if showProgress {
+				progress <- maxX - x
+			}
+			break
+		}
+		if showProgress {
+			progress <- newX - x
+		}
 		x = newX
 	}
 	return string(result)
@@ -104,54 +114,89 @@ func epanic(e error) {
 	}
 }
 
+var showProgress, useNbsp, trim bool
+
+func init() {
+	flag.BoolVar(&showProgress, "progress", false, "print progress")
+	flag.BoolVar(&useNbsp, "nbsp", false, "no break space")
+	flag.BoolVar(&trim, "trim", false, "trim trailing whitespace")
+}
+
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage:", os.Args[0], "FILE", "FONT")
-		os.Exit(0)
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n%s FILENAME FONT.TTF\n", os.Args[0], os.Args[0])
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+	flag.Parse()
+	args := flag.Args()
+	if len(args) < 2 {
+		flag.Usage()
 	}
 	// Decode font
-	f, e := os.ReadFile(os.Args[2])
+	f, e := os.ReadFile(args[1])
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read font %s\n", os.Args[2])
+		fmt.Fprintf(os.Stderr, "Failed to read font %s\n", args[1])
 		os.Exit(1)
 	}
 	usedFont, e := freetype.ParseFont(f)
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", os.Args[2])
+		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", args[1])
 		os.Exit(1)
 	}
 
 	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
 	// Decode image
-	src, e := os.Open(os.Args[1])
+	src, e := os.Open(args[0])
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open image %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Failed to open image %s\n", args[0])
 		os.Exit(1)
 	}
 	decoded, _, e := image.Decode(src)
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to decode image %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Failed to decode image %s\n", args[0])
 		os.Exit(1)
 	}
 	size := decoded.Bounds().Size()
 	asciinated := make([]string, size.Y/LINE_HEIGHT)
+	progress := make(chan fixed.Int26_6)
 	mut := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	wg.Add(len(asciinated))
+	// Close progress channel on completion
+	go func() {
+		wg.Wait()
+		close(progress)
+	}()
 	for y := range asciinated {
 		go func(y int) {
 			defer wg.Done()
 			region := image.NewGray(image.Rect(0, 0, size.X, LINE_HEIGHT))
 			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * LINE_HEIGHT}, draw.Src)
-			result := detLine(usedFont, region)
+			result := detLine(usedFont, region, progress)
 			mut.Lock()
 			asciinated[y] = result
 			mut.Unlock()
 		}(y)
 	}
-	wg.Wait()
+	total_progress := float64(len(asciinated) * size.X << 6)
+	var current_progress float64 = 0
+	for delta := range progress {
+		current_progress += float64(delta)
+		fmt.Fprintf(os.Stderr, "\rProgress: %%%.2f", current_progress*100/total_progress)
+	}
+	// Move to next line if any progress reports were made
+	if current_progress > 0 {
+		fmt.Fprintln(os.Stderr)
+	}
 	for _, line := range asciinated {
-		fmt.Println(strings.ReplaceAll(strings.TrimRight(line, " "), " ", "\u00A0"))
+		if trim {
+			line = strings.TrimRight(line, " ")
+		}
+		if useNbsp {
+			line = strings.ReplaceAll(line, " ", "\u00A0")
+		}
+		fmt.Println(line)
 	}
 
 }

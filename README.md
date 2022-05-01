@@ -1,8 +1,6 @@
 # Asciize Proportional
 
-Attempt at an image to ascii converter (proportional version).
-
-Spaces are replaced with nbsp, so technically it isn't a "pure" ascii image.
+Attempt at an image to ascii converter (proportional font capable version).
 
 This program works best with high contrast images.
 
@@ -13,3 +11,5 @@ To convert the image at FILENAME with the font at FONT.TTF:
 ```
 go run . FILENAME FONT.TTF
 ```
+
+Run ```go run . FILENAME FONT.TTF``` for more options.
