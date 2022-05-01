@@ -32,51 +32,67 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
+	"strings"
 	"sync"
 
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/inconsolata"
 
 	"golang.org/x/image/math/fixed"
 )
 
-// Detect the character that best suits the region src.
-func detChar(src *image.Gray) byte {
-	img := image.NewGray(image.Rect(0, 0, 8, 16))
-	var bestScore = 255*8*16 + 1 // Maximum possible value + 1
-	var best byte
-	var i byte
+var usedFont *truetype.Font
+
+// Detect the line that best suits the region src.
+func detLine(src *image.Gray) string {
+	result := make([]byte, 0)
+	myFace := truetype.NewFace(usedFont, &truetype.Options{})
+	img := image.NewGray(src.Bounds())
 	drawer := font.Drawer{
 		Dst:  img,
 		Src:  &image.Uniform{color.Black},
-		Face: inconsolata.Regular8x16,
-		Dot:  fixed.Point26_6{X: 0, Y: 16 << 6},
+		Face: myFace,
+		Dot:  fixed.Point26_6{X: 0, Y: (fixed.Int26_6(src.Bounds().Max.Y) << 6) * 2 / 3},
 	}
-	for i = 0; i < 128; i++ {
-		draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
-		drawer.Dot.X = 0
-		drawer.DrawBytes([]byte{i})
-		// Skip if no glyph was rendered
-		if drawer.Dot.X == 0 {
-			continue
-		}
-		// Calculate the score (difference from desired image)
-		// This works on the assumption that the two images are the same dimensions
-		score := 0
-		for pixel := range img.Pix {
-			delta := int(img.Pix[pixel]) - int(src.Pix[pixel])
-			if delta < 0 {
-				score -= delta
-			} else {
-				score += delta
+	var x fixed.Int26_6 = 0
+	maxX := fixed.Int26_6(src.Bounds().Max.X) << 6
+	var i byte
+	for x < maxX {
+		var bestScore = 2 << 30
+		var best byte
+		newX := x
+		// Skip control characters
+		for i = 32; i < 127; i++ {
+			draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
+			drawer.Dot.X = x
+			drawer.DrawBytes([]byte{i})
+			// Skip if no glyph was rendered
+			if drawer.Dot.X == x {
+				continue
+			}
+			// Calculate the score (difference from desired image)
+			score := 0
+			for pixelX := int(x >> 6); pixelX < int(drawer.Dot.X>>6); pixelX++ {
+				for pixelY := src.Bounds().Min.Y; pixelY < src.Bounds().Max.Y; pixelY++ {
+					delta := int(src.GrayAt(pixelX, pixelY).Y) - int(img.GrayAt(pixelX, pixelY).Y)
+					if delta < 0 {
+						score -= delta
+					} else {
+						score += delta
+					}
+				}
+			}
+			if score < bestScore {
+				bestScore = score
+				best = i
+				newX = drawer.Dot.X
 			}
 		}
-		if score < bestScore {
-			bestScore = score
-			best = i
-		}
+		result = append(result, best)
+		x = newX
 	}
-	return best
+	return string(result)
 }
 func epanic(e error) {
 	if e != nil {
@@ -85,10 +101,22 @@ func epanic(e error) {
 }
 
 func main() {
-	if len(os.Args) == 1 {
-		fmt.Println("Usage:", os.Args[0], "FILE")
+	const LINE_HEIGHT = 20
+	if len(os.Args) < 3 {
+		fmt.Println("Usage:", os.Args[0], "FILE", "FONT")
 		os.Exit(0)
 	}
+	// Decode font
+	f, e := os.ReadFile(os.Args[2])
+
+	epanic(e)
+	font, err := freetype.ParseFont(f)
+	if err != nil {
+		panic(err)
+	}
+
+	usedFont = font
+	// Decode image
 	src, e := os.Open(os.Args[1])
 	epanic(e)
 	decoded, _, e := image.Decode(src)
@@ -96,31 +124,25 @@ func main() {
 	// Size of the image in ascii characters
 	// Note: The program is currently hardcoded to a 8x16 font size
 	size := decoded.Bounds().Size()
-	size.X /= 8
-	size.Y /= 16
-	asciinated := make([][]byte, size.Y)
-	for i := range asciinated {
-		asciinated[i] = make([]byte, size.X)
-	}
+	size.Y /= LINE_HEIGHT
+	asciinated := make([]string, size.Y)
 	mut := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
-	wg.Add(size.X * size.Y)
+	wg.Add(size.Y)
 	for y := range asciinated {
-		for x := range asciinated[y] {
-			go func(x, y int) {
-				defer wg.Done()
-				region := image.NewGray(image.Rect(0, 0, 8, 16))
-				draw.Draw(region, region.Bounds(), decoded, image.Point{X: x * 8, Y: y * 16}, draw.Src)
-				result := detChar(region)
-				mut.Lock()
-				asciinated[y][x] = result
-				mut.Unlock()
-			}(x, y)
-		}
+		go func(y int) {
+			defer wg.Done()
+			region := image.NewGray(image.Rect(0, 0, size.X, 16))
+			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * LINE_HEIGHT}, draw.Src)
+			result := detLine(region)
+			mut.Lock()
+			asciinated[y] = result
+			mut.Unlock()
+		}(y)
 	}
 	wg.Wait()
 	for _, line := range asciinated {
-		fmt.Println(string(line))
+		fmt.Println(strings.ReplaceAll(line, " ", "\u00A0"))
 	}
 
 }
