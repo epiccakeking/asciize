@@ -83,6 +83,8 @@ func detLine(src *image.Gray) string {
 					}
 				}
 			}
+			// Normalize score based on width of the glyph
+			score /= int((drawer.Dot.X - x) >> 6)
 			if score < bestScore {
 				bestScore = score
 				best = i
