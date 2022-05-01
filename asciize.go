@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 
+	_ "golang.org/x/image/webp"
+
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
@@ -47,6 +49,7 @@ func detLine(usedFont *truetype.Font, src *image.Gray) string {
 	result := make([]byte, 0)
 	myFace := truetype.NewFace(usedFont, &truetype.Options{})
 	img := image.NewGray(src.Bounds())
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
 	drawer := font.Drawer{
 		Dst:  img,
 		Src:  &image.Uniform{color.Black},
@@ -62,7 +65,6 @@ func detLine(usedFont *truetype.Font, src *image.Gray) string {
 		newX := x
 		// Skip control characters
 		for i = 32; i < 127; i++ {
-			draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
 			drawer.Dot.X = x
 			drawer.DrawBytes([]byte{i})
 			// Skip if no glyph was rendered
@@ -88,6 +90,8 @@ func detLine(usedFont *truetype.Font, src *image.Gray) string {
 				best = i
 				newX = drawer.Dot.X
 			}
+			// Blank area used
+			draw.Draw(img, image.Rect(x.Floor(), src.Bounds().Min.Y, drawer.Dot.X.Ceil(), src.Bounds().Max.Y), &image.Uniform{color.White}, image.Point{}, draw.Src)
 		}
 		result = append(result, best)
 		x = newX
@@ -107,31 +111,37 @@ func main() {
 	}
 	// Decode font
 	f, e := os.ReadFile(os.Args[2])
-
-	epanic(e)
-	usedFont, err := freetype.ParseFont(f)
-	if err != nil {
-		panic(err)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Failed to read font %s\n", os.Args[2])
+		os.Exit(1)
+	}
+	usedFont, e := freetype.ParseFont(f)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", os.Args[2])
+		os.Exit(1)
 	}
 
 	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
 	// Decode image
 	src, e := os.Open(os.Args[1])
-	epanic(e)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open image %s\n", os.Args[1])
+		os.Exit(1)
+	}
 	decoded, _, e := image.Decode(src)
-	epanic(e)
-	// Size of the image in ascii characters
-	// Note: The program is currently hardcoded to a 8x16 font size
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Failed to decode image %s\n", os.Args[1])
+		os.Exit(1)
+	}
 	size := decoded.Bounds().Size()
-	size.Y /= LINE_HEIGHT
-	asciinated := make([]string, size.Y)
+	asciinated := make([]string, size.Y/LINE_HEIGHT)
 	mut := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
-	wg.Add(size.Y)
+	wg.Add(len(asciinated))
 	for y := range asciinated {
 		go func(y int) {
 			defer wg.Done()
-			region := image.NewGray(image.Rect(0, 0, size.X, 16))
+			region := image.NewGray(image.Rect(0, 0, size.X, LINE_HEIGHT))
 			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * LINE_HEIGHT}, draw.Src)
 			result := detLine(usedFont, region)
 			mut.Lock()
