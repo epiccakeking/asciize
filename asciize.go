@@ -42,10 +42,8 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-var usedFont *truetype.Font
-
 // Detect the line that best suits the region src.
-func detLine(src *image.Gray) string {
+func detLine(usedFont *truetype.Font, src *image.Gray) string {
 	result := make([]byte, 0)
 	myFace := truetype.NewFace(usedFont, &truetype.Options{})
 	img := image.NewGray(src.Bounds())
@@ -53,7 +51,7 @@ func detLine(src *image.Gray) string {
 		Dst:  img,
 		Src:  &image.Uniform{color.Black},
 		Face: myFace,
-		Dot:  fixed.Point26_6{X: 0, Y: (fixed.Int26_6(src.Bounds().Max.Y) << 6) * 2 / 3},
+		Dot:  fixed.Point26_6{X: 0, Y: myFace.Metrics().Ascent},
 	}
 	var x fixed.Int26_6 = 0
 	maxX := fixed.Int26_6(src.Bounds().Max.X) << 6
@@ -103,7 +101,6 @@ func epanic(e error) {
 }
 
 func main() {
-	const LINE_HEIGHT = 20
 	if len(os.Args) < 3 {
 		fmt.Println("Usage:", os.Args[0], "FILE", "FONT")
 		os.Exit(0)
@@ -117,7 +114,8 @@ func main() {
 		panic(err)
 	}
 
-	usedFont = font
+	usedFont := font
+	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
 	// Decode image
 	src, e := os.Open(os.Args[1])
 	epanic(e)
@@ -136,7 +134,7 @@ func main() {
 			defer wg.Done()
 			region := image.NewGray(image.Rect(0, 0, size.X, 16))
 			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * LINE_HEIGHT}, draw.Src)
-			result := detLine(region)
+			result := detLine(usedFont, region)
 			mut.Lock()
 			asciinated[y] = result
 			mut.Unlock()
