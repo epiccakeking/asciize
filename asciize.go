@@ -109,12 +109,11 @@ func main() {
 	f, e := os.ReadFile(os.Args[2])
 
 	epanic(e)
-	font, err := freetype.ParseFont(f)
+	usedFont, err := freetype.ParseFont(f)
 	if err != nil {
 		panic(err)
 	}
 
-	usedFont := font
 	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
 	// Decode image
 	src, e := os.Open(os.Args[1])
@@ -142,7 +141,7 @@ func main() {
 	}
 	wg.Wait()
 	for _, line := range asciinated {
-		fmt.Println(strings.ReplaceAll(line, " ", "\u00A0"))
+		fmt.Println(strings.ReplaceAll(strings.TrimRight(line, " "), " ", "\u00A0"))
 	}
 
 }
