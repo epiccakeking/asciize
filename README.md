@@ -12,4 +12,4 @@ To convert the image at FILENAME with the font at FONT.TTF:
 go run . FILENAME FONT.TTF
 ```
 
-Run ```go run . FILENAME FONT.TTF``` for more options.
+Run ```go run . -help``` for more options.
