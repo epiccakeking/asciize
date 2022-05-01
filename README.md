@@ -1,6 +1,6 @@
-# Asciize Proportional
+# Asciize
 
-Attempt at an image to ascii converter (proportional font capable version).
+Attempt at an image to ascii converter.
 
 This program works best with high contrast images.
 
