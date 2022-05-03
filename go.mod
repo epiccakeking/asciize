@@ -1,4 +1,4 @@
-module asciize
+module github.com/epiccakeking/asciize
 
 go 1.18
 
