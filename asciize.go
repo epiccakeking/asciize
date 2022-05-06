@@ -36,11 +36,12 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gomono"
 	_ "golang.org/x/image/webp"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
-	"golang.org/x/image/font"
 
 	"golang.org/x/image/math/fixed"
 )
@@ -114,35 +115,43 @@ func epanic(e error) {
 	}
 }
 
+// Flags
 var showProgress, useNbsp, trim bool
+var fontPath string
 
 func init() {
 	flag.BoolVar(&showProgress, "progress", false, "print progress")
-	flag.BoolVar(&useNbsp, "nbsp", false, "no break space")
+	flag.BoolVar(&useNbsp, "nbsp", false, "convert spaces to no break space")
 	flag.BoolVar(&trim, "trim", false, "trim trailing whitespace")
+	flag.StringVar(&fontPath, "font", "", "path to ttf font file to use (uses gomono if unset)")
 }
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n%s FILENAME FONT.TTF\n", os.Args[0], os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n%s FILENAME\n", os.Args[0], os.Args[0])
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 	flag.Parse()
 	args := flag.Args()
-	if len(args) < 2 {
+	if len(args) != 1 {
 		flag.Usage()
 	}
 	// Decode font
-	f, e := os.ReadFile(args[1])
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read font %s\n", args[1])
-		os.Exit(1)
-	}
-	usedFont, e := freetype.ParseFont(f)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", args[1])
-		os.Exit(1)
+	var usedFont *truetype.Font
+	if len(fontPath) > 0 {
+		f, e := os.ReadFile(fontPath)
+		if e != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read font %s\n", fontPath)
+			os.Exit(1)
+		}
+		usedFont, e = freetype.ParseFont(f)
+		if e != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", fontPath)
+			os.Exit(1)
+		}
+	} else {
+		usedFont, _ = freetype.ParseFont(gomono.TTF)
 	}
 
 	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
