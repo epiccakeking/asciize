@@ -38,18 +38,20 @@ import (
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
+	"golang.org/x/image/font/sfnt"
 	_ "golang.org/x/image/webp"
 
-	"github.com/golang/freetype"
-	"github.com/golang/freetype/truetype"
-
+	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
 // Detect the line that best suits the region src.
-func detLine(usedFont *truetype.Font, src *image.Gray, progress chan fixed.Int26_6) string {
+func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) string {
 	result := make([]byte, 0)
-	myFace := truetype.NewFace(usedFont, &truetype.Options{})
+	myFace, e := opentype.NewFace(usedFont, faceOptions)
+	if e != nil {
+		panic(e)
+	}
 	img := image.NewGray(src.Bounds())
 	draw.Draw(img, img.Bounds(), &image.Uniform{color.White}, image.Point{}, draw.Src)
 	drawer := font.Drawer{
@@ -118,12 +120,18 @@ func epanic(e error) {
 // Flags
 var showProgress, useNbsp, trim bool
 var fontPath string
+var faceOptions = &opentype.FaceOptions{
+	Size:    12,
+	DPI:     72,
+	Hinting: font.HintingNone,
+}
 
 func init() {
 	flag.BoolVar(&showProgress, "progress", false, "print progress")
 	flag.BoolVar(&useNbsp, "nbsp", false, "convert spaces to no break space")
 	flag.BoolVar(&trim, "trim", false, "trim trailing whitespace")
 	flag.StringVar(&fontPath, "font", "", "path to ttf font file to use (uses gomono if unset)")
+	flag.Float64Var(&faceOptions.Size, "size", 12, "font size to use")
 }
 
 func main() {
@@ -138,23 +146,27 @@ func main() {
 		flag.Usage()
 	}
 	// Decode font
-	var usedFont *truetype.Font
+	var usedFont *sfnt.Font
 	if len(fontPath) > 0 {
 		f, e := os.ReadFile(fontPath)
 		if e != nil {
 			fmt.Fprintf(os.Stderr, "Failed to read font %s\n", fontPath)
 			os.Exit(1)
 		}
-		usedFont, e = freetype.ParseFont(f)
+		usedFont, e = opentype.Parse(f)
 		if e != nil {
 			fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", fontPath)
 			os.Exit(1)
 		}
 	} else {
-		usedFont, _ = freetype.ParseFont(gomono.TTF)
+		usedFont, _ = opentype.Parse(gomono.TTF)
 	}
-
-	LINE_HEIGHT := int(truetype.NewFace(usedFont, &truetype.Options{}).Metrics().Height >> 6)
+	// Create font face
+	myFace, e := opentype.NewFace(usedFont, faceOptions)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", fontPath)
+	}
+	LINE_HEIGHT := myFace.Metrics().Height.Ceil()
 	// Decode image
 	src, e := os.Open(args[0])
 	if e != nil {
