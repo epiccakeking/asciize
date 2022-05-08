@@ -77,7 +77,12 @@ func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) 
 			}
 			// Calculate the score (difference from desired image)
 			score := 0
-			for pixelX := int(x >> 6); pixelX < int(drawer.Dot.X>>6); pixelX++ {
+			// Don't include out of bounds image data.
+			rightBound := drawer.Dot.X.Ceil()
+			if rightBound > maxX.Ceil() {
+				rightBound = maxX.Ceil()
+			}
+			for pixelX := x.Floor(); pixelX <= rightBound; pixelX++ {
 				for pixelY := src.Bounds().Min.Y; pixelY < src.Bounds().Max.Y; pixelY++ {
 					delta := int(src.GrayAt(pixelX, pixelY).Y) - int(img.GrayAt(pixelX, pixelY).Y)
 					if delta < 0 {
@@ -88,7 +93,7 @@ func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) 
 				}
 			}
 			// Normalize score based on width of the glyph
-			score /= int((drawer.Dot.X - x) >> 6)
+			score /= rightBound - x.Floor() + 1
 			if score < bestScore {
 				bestScore = score
 				best = i
@@ -97,13 +102,13 @@ func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) 
 			// Blank area used
 			draw.Draw(img, image.Rect(x.Floor(), src.Bounds().Min.Y, drawer.Dot.X.Ceil(), src.Bounds().Max.Y), &image.Uniform{color.White}, image.Point{}, draw.Src)
 		}
-		result = append(result, best)
-		if x >= maxX {
+		if newX >= maxX {
 			if showProgress {
 				progress <- maxX - x
 			}
 			break
 		}
+		result = append(result, best)
 		if showProgress {
 			progress <- newX - x
 		}
