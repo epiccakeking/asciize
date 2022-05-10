@@ -45,6 +45,11 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+const (
+	scoreShape = iota
+	scoreShade
+)
+
 // Detect the line that best suits the region src.
 func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) string {
 	result := make([]byte, 0)
@@ -82,18 +87,32 @@ func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) 
 			if rightBound > maxX.Ceil() {
 				rightBound = maxX.Ceil()
 			}
-			for pixelX := x.Floor(); pixelX <= rightBound; pixelX++ {
-				for pixelY := src.Bounds().Min.Y; pixelY < src.Bounds().Max.Y; pixelY++ {
-					delta := int(src.GrayAt(pixelX, pixelY).Y) - int(img.GrayAt(pixelX, pixelY).Y)
-					if delta < 0 {
-						score -= delta
-					} else {
-						score += delta
+			switch scoreMode {
+			case scoreShape:
+				for pixelX := x.Floor(); pixelX <= rightBound; pixelX++ {
+					for pixelY := src.Bounds().Min.Y; pixelY < src.Bounds().Max.Y; pixelY++ {
+						delta := int(src.GrayAt(pixelX, pixelY).Y) - int(img.GrayAt(pixelX, pixelY).Y)
+						if delta < 0 {
+							score -= delta
+						} else {
+							score += delta
+						}
 					}
 				}
+				// Normalize score based on width of the glyph
+				score /= rightBound - x.Floor() + 1
+			case scoreShade:
+				for pixelX := x.Floor(); pixelX <= rightBound; pixelX++ {
+					for pixelY := src.Bounds().Min.Y; pixelY < src.Bounds().Max.Y; pixelY++ {
+						score += int(src.GrayAt(pixelX, pixelY).Y) - int(img.GrayAt(pixelX, pixelY).Y)
+					}
+				}
+				if score < 0 {
+					score = -score
+				}
+				score /= rightBound - x.Floor() + 1
 			}
-			// Normalize score based on width of the glyph
-			score /= rightBound - x.Floor() + 1
+
 			if score < bestScore {
 				bestScore = score
 				best = i
@@ -130,6 +149,8 @@ var faceOptions = &opentype.FaceOptions{
 	DPI:     72,
 	Hinting: font.HintingNone,
 }
+var scoreMode = scoreShade
+var scoreModeArg string
 
 func init() {
 	flag.BoolVar(&showProgress, "progress", false, "print progress")
@@ -137,18 +158,25 @@ func init() {
 	flag.BoolVar(&trim, "trim", false, "trim trailing whitespace")
 	flag.StringVar(&fontPath, "font", "", "path to ttf font file to use (uses gomono if unset)")
 	flag.Float64Var(&faceOptions.Size, "size", 12, "font size to use")
+	flag.StringVar(&scoreModeArg, "score", "shape", "how to score [shape/shade]")
 }
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n%s FILENAME\n", os.Args[0], os.Args[0])
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
 	flag.Parse()
 	args := flag.Args()
+	switch scoreModeArg {
+	case "shape":
+		scoreMode = scoreShape
+	case "shade":
+		scoreMode = scoreShade
+	default: // Invalid arguments
+		fmt.Fprintf(os.Stderr, "Bad scoring mode \"%s\"\n", scoreModeArg)
+		flag.Usage()
+		os.Exit(2)
+	}
 	if len(args) != 1 {
 		flag.Usage()
+		os.Exit(2)
 	}
 	// Decode font
 	var usedFont *sfnt.Font
