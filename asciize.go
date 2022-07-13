@@ -38,11 +38,10 @@ import (
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
-	"golang.org/x/image/font/sfnt"
-	_ "golang.org/x/image/webp"
-
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -135,11 +134,6 @@ func detLine(usedFont *sfnt.Font, src *image.Gray, progress chan fixed.Int26_6) 
 	}
 	return string(result)
 }
-func epanic(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
 
 // Flags
 var showProgress, useNbsp, trim bool
@@ -172,62 +166,81 @@ func main() {
 	default: // Invalid arguments
 		fmt.Fprintf(os.Stderr, "Bad scoring mode \"%s\"\n", scoreModeArg)
 		flag.Usage()
-		os.Exit(2)
+		os.Exit(64)
 	}
-	if len(args) != 1 {
+
+	if l := len(args); l != 1 {
+		if l == 0 {
+			fmt.Fprintln(os.Stderr, "No image file specified")
+		} else {
+			fmt.Fprintf(os.Stderr, "%d image files specified, expected 1\n", l)
+		}
 		flag.Usage()
-		os.Exit(2)
+		os.Exit(64)
 	}
+
 	// Decode font
 	var usedFont *sfnt.Font
 	if len(fontPath) > 0 {
 		f, e := os.ReadFile(fontPath)
 		if e != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read font %s\n", fontPath)
-			os.Exit(1)
+			fmt.Fprintf(os.Stderr, "Failed to open font %s\n", fontPath)
+			os.Exit(66)
 		}
 		usedFont, e = opentype.Parse(f)
 		if e != nil {
 			fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", fontPath)
-			os.Exit(1)
+			os.Exit(66)
 		}
 	} else {
 		usedFont, _ = opentype.Parse(gomono.TTF)
 	}
+
 	// Create font face
 	myFace, e := opentype.NewFace(usedFont, faceOptions)
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Failed to parse font %s\n", fontPath)
+		os.Exit(66)
 	}
-	LINE_HEIGHT := myFace.Metrics().Height.Ceil()
+	lineHeight := myFace.Metrics().Height.Ceil()
+
 	// Decode image
 	src, e := os.Open(args[0])
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open image %s\n", args[0])
-		os.Exit(1)
+		os.Exit(66)
 	}
 	decoded, _, e := image.Decode(src)
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Failed to decode image %s\n", args[0])
-		os.Exit(1)
+		os.Exit(66)
 	}
+
 	size := decoded.Bounds().Size()
-	asciinated := make([]string, size.Y/LINE_HEIGHT)
+	asciinated := make([]string, size.Y/lineHeight)
 	progress := make(chan fixed.Int26_6)
 	mut := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	wg.Add(len(asciinated))
+
 	// Close progress channel on completion
 	go func() {
 		wg.Wait()
 		close(progress)
 	}()
+
 	for y := range asciinated {
 		go func(y int) {
 			defer wg.Done()
-			region := image.NewGray(image.Rect(0, 0, size.X, LINE_HEIGHT))
-			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * LINE_HEIGHT}, draw.Src)
+			region := image.NewGray(image.Rect(0, 0, size.X, lineHeight))
+			draw.Draw(region, region.Bounds(), decoded, image.Point{X: 0, Y: y * lineHeight}, draw.Src)
 			result := detLine(usedFont, region, progress)
+			if trim {
+				result = strings.TrimRight(result, " ")
+			}
+			if useNbsp {
+				result = strings.ReplaceAll(result, " ", "\u00A0")
+			}
 			mut.Lock()
 			asciinated[y] = result
 			mut.Unlock()
@@ -244,13 +257,6 @@ func main() {
 		fmt.Fprintln(os.Stderr)
 	}
 	for _, line := range asciinated {
-		if trim {
-			line = strings.TrimRight(line, " ")
-		}
-		if useNbsp {
-			line = strings.ReplaceAll(line, " ", "\u00A0")
-		}
 		fmt.Println(line)
 	}
-
 }
