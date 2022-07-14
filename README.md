@@ -13,8 +13,15 @@ This program works best with high contrast images.
 
 ## Run
 
+To convert the file at FILENAME:
 ```
-go run . FILENAME
+go run github.com/epiccakeking/asciize@latest FILENAME
 ```
 
-Run ```go run . -help``` for more options.
+Additional options are available with -help.
+
+Install using go install if you would like to be able to call as asciize (assuming your path is configured correctly):
+```
+go install github.com/epiccakeking/asciize@latest
+asciize
+```
